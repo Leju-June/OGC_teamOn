@@ -9,3 +9,6 @@ alg_tester -> 알고리즘 테스트 해볼 수 있는데, cpsat에 들어가는
 
 일단 cpsat으로 제출 한 번 했는데, 결과보고 더 최적화할지 안할지 고를듯
 각 변수가 뭘 의미하는지는 OGC폴더에 Algorithm_Variables_Guide.md 참고
+
+먼저
+Gemini.txt읽고 pdf랑 예제 번역본 같이 펴서 읽어보고 흥미 있으면 기기
