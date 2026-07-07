@@ -1,0 +1,67 @@
+# OGC 2026: The Grand Shipyard Puzzle - 문제 이해 및 작업 계획
+
+## 1. 문제 상황 요약 (Problem Situation)
+본 문제는 조선소 베이(Bay) 내에서 선박 블록(Block)들의 공간적 배치와 시간적 스케줄링을 동시에 결정해야 하는 최적화 문제입니다.
+
+* **결정 변수**:
+  각 블록 $i$에 대해 다음을 결정해야 합니다.
+  1. 할당할 베이 (Bay $j$)
+  2. 베이 내에서의 위치 (Location $x, y$) 및 방향 (Orientation $o$)
+  3. 베이 반입 시점 (Entry time, $ENTRY_i$)
+  4. 베이 반출 시점 (Exit time, $EXIT_i$)
+
+* **제약 조건 (Constraints)**:
+  - **할당 및 작업 제약**: 모든 블록은 정확히 하나의 베이에 할당되며, 한 번의 반입(Entry)과 반출(Exit) 과정만 거칩니다. 하루 중 모든 반출 작업은 반입 작업보다 먼저 수행되어야 합니다.
+  - **시간 제약**: 
+    - 반입 시간은 출시일 이후여야 함: $ENTRY_i \ge R_i$
+    - 반출 전까지 최소 가공 시간 충족: $EXIT_i - ENTRY_i \ge P_i$
+  - **공간 제약**:
+    - **베이 포함 (Bay Containment)**: 블록은 할당된 베이 경계 내에 완전히 포함되어야 합니다.
+    - **레이어 충돌 방지 (Layer Collision-free)**: 같은 날, 같은 베이에 있는 블록들은 동일한 높이의 레이어에서 기하학적으로 겹치지 않아야 합니다.
+    - **크레인 작업 (Crane Operation)**: 블록을 반입하거나 반출할 때, 수직 경로 상에 다른 블록이 막고 있지 않아야 합니다 (상위 레이어에 의한 간섭 금지).
+
+* **목적 함수 (Objective Function)**:
+  다음 세 가지 지표의 가중합($w_1Z_1 + w2_Z2 + w_3Z3$)을 최소화합니다.
+  1. **$Z_1$ (총 지연 시간)**: 납기일($D_i$)을 초과한 시간의 총합 $\sum T_i$
+  2. **$Z_2$ (작업량 불균형)**: 베이 간 정규화된 작업량 차이의 최댓값 (작업량을 베이 크기에 비례하여 분배)
+  3. **$Z_3$ (선호도 하락)**: 블록이 가장 선호하는 베이에 할당되지 못함에 따른 선호도 점수 페널티의 총합
+
+## 2. 기본 환경 구축 내역
+* **README 파일 확인**: 다음 세 개의 README 파일을 읽고 구조와 평가 방식을 확인했습니다.
+  1. `ogc2026/README.txt`: 전체 디렉토리 구조 및 시작 가이드
+  2. `ogc2026/alg_tester/README.txt`: 로컬 알고리즘 테스트 툴(`alg_tester_app.py`) 사용법
+  3. `ogc2026/baseline/README.txt`: 베이스라인 알고리즘 구조 및 제출 인터페이스(`myalgorithm.py` 내 `algorithm(prob_info, timelimit)` 함수 형태 유지 필요)
+* **환경 설정**: `C:\Users\user\miniforge3` 경로에 `miniforge3`가 이미 설치되어 있으며, 콘다 환경 `ogc2026`가 이미 생성되어 있는 상태임을 확인했습니다. 환경 활성화 또는 직접 실행을 위해 다음과 같은 방법을 사용합니다:
+  - PowerShell/CMD 터미널 환경 변수 등록 또는 `C:\Users\user\miniforge3\condabin\conda.bat`를 활용하여 콘다 명령어 실행
+  - 파이썬 인터프리터 직접 지정 실행: `C:\Users\user\miniforge3\envs\ogc2026\python.exe`
+
+
+## 3. 나의 역할 (My Role)
+* **알고리즘 개발 및 구현**: `baseline_greedy.py`와 같은 새로운 최적화 알고리즘 코드 파일들을 파이썬으로 구현합니다. (예: 메타휴리스틱, 강화학습, 개선된 그리디 등)
+* **실행 및 테스트 지원**: 구현된 알고리즘이 주어진 시간 내에 실행되고 타당성 검사(Feasibility check)를 통과할 수 있도록 디버깅 및 테스트를 돕습니다.
+* **알고리즘 문서화**: 새로운 알고리즘 코드 파일을 하나 만들 때마다, `baseline` 폴더 내에 해당 알고리즘 이름과 매칭되는 텍스트 파일(설명서)을 생성하여 알고리즘의 작동 방식 및 특징을 기록합니다.
+
+## 4. 실행 방법 가이드 (Execution Guide)
+알고리즘 테스트 및 시각화 도구(`alg_tester_app.py`)를 실행하려면 아래 단계를 따르세요.
+
+1. **Miniforge Prompt 실행**:
+   - Windows 시작 메뉴에서 **"Miniforge Prompt"** 또는 **"Anaconda Prompt"**를 검색하여 실행합니다.
+
+2. **Conda 환경 활성화**:
+   - 프롬프트 창에 다음 명령어를 입력하여 환경을 활성화합니다.
+     ```cmd
+     conda activate ogc2026
+     ```
+
+3. **테스터 폴더로 이동**:
+   - 알고리즘 테스터가 있는 디렉토리로 이동합니다.
+     ```cmd
+     cd c:\Users\user\Desktop\OGC\ogc2026\alg_tester
+     ```
+
+4. **테스터 앱 실행**:
+   - 다음 명령어로 UI 애플리케이션을 실행합니다.
+     ```cmd
+     python alg_tester_app.py
+     ```
+
