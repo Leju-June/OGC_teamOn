@@ -1,0 +1,11 @@
+OGC 폴더
+pdf, 예제 번역본 -> 대회에서 제시한 문제 상황 적혀있음
+Gemini.txt -> 제미나이한테 위에 문제 상황 요약해달라한거
+
+ogc2026 폴더
+baseline -> 알고리즘 파일하고, utils파일 있음
+ baseline이 기본적으로 있고, simple하고 cpsat을 새로 만들었음
+alg_tester -> 알고리즘 테스트 해볼 수 있는데, cpsat에 들어가는 라이브러리가 실행 안 되서 따로 test_run돌려야함
+
+일단 cpsat으로 제출 한 번 했는데, 결과보고 더 최적화할지 안할지 고를듯
+각 변수가 뭘 의미하는지는 OGC폴더에 Algorithm_Variables_Guide.md 참고
