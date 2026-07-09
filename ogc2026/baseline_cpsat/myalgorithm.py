@@ -439,16 +439,13 @@ def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
         return new_state
     return None
 
-def post_optimize_time(state, prob_info, bays, start_time, timelimit):
+def post_optimize_time(state, prob_info, bays):
     # 4. 후처리 시간 당기기 최적화 (Post-Optimization Local Search)
     new_state = dict(state)
     changed = True
     while changed:
         changed = False
         for b_id in sorted(new_state.keys(), key=lambda k: new_state[k][5]):
-            if time.time() - start_time > timelimit - 0.5:
-                return new_state
-                
             bay_id, x, y, o_idx, entry, exit_t = new_state[b_id]
             b_info = prob_info['blocks'][b_id]
             r_time = b_info['release_time']
@@ -483,10 +480,6 @@ def post_optimize_time(state, prob_info, bays, start_time, timelimit):
                 if best_entry < entry:
                     new_state[b_id] = (bay_id, x, y, o_idx, best_entry, best_exit)
                     changed = True
-                    
-        if time.time() - start_time > timelimit - 0.5:
-            break
-            
     return new_state
 
 def algorithm(prob_info, timelimit=60):
@@ -508,7 +501,7 @@ def algorithm(prob_info, timelimit=60):
     # 3. ALNS 가중치 초기화
     alns_weights = [1.0, 1.0, 1.0]
     
-    while time.time() - start_time < timelimit * 0.95:
+    while time.time() - start_time < 55.0:
         # ALNS 룰렛 휠 선택
         operator = random.choices([0, 1, 2], weights=alns_weights)[0]
         if operator == 0:
@@ -548,5 +541,5 @@ def algorithm(prob_info, timelimit=60):
         # ALNS 가중치 업데이트
         alns_weights[operator] = alns_weights[operator] * 0.9 + score * 0.1
                     
-    best_state = post_optimize_time(best_state, prob_info, bays, start_time, timelimit)
+    best_state = post_optimize_time(best_state, prob_info, bays)
     return format_solution(best_state)
