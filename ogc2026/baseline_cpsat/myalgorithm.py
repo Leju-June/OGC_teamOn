@@ -1,6 +1,7 @@
 import time
 import random
 import math
+import multiprocessing
 from collections import defaultdict
 from ortools.sat.python import cp_model
 
@@ -439,13 +440,16 @@ def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
         return new_state
     return None
 
-def post_optimize_time(state, prob_info, bays):
+def post_optimize_time(state, prob_info, bays, start_time, timelimit):
     # 4. 후처리 시간 당기기 최적화 (Post-Optimization Local Search)
     new_state = dict(state)
     changed = True
     while changed:
         changed = False
         for b_id in sorted(new_state.keys(), key=lambda k: new_state[k][5]):
+            if time.time() - start_time > timelimit - 0.5:
+                return new_state
+                
             bay_id, x, y, o_idx, entry, exit_t = new_state[b_id]
             b_info = prob_info['blocks'][b_id]
             r_time = b_info['release_time']
@@ -480,28 +484,39 @@ def post_optimize_time(state, prob_info, bays):
                 if best_entry < entry:
                     new_state[b_id] = (bay_id, x, y, o_idx, best_entry, best_exit)
                     changed = True
+                    
+        if time.time() - start_time > timelimit - 0.5:
+            break
+            
     return new_state
 
-def algorithm(prob_info, timelimit=60):
-    start_time = time.time()
+def alns_worker(prob_info, bays, initial_state, initial_obj, timelimit, start_time, seed, alns_duration):
+    random.seed(seed)
     
-    bays_info = prob_info['bays']
-    bays = [Bay(width=b['width'], height=b['height'], id=i) for i, b in enumerate(bays_info)]
-    
-    current_state = initialization(prob_info, bays, timelimit, start_time)
-    best_state = dict(current_state)
-    best_obj = compute_objective_val(prob_info, bays, best_state)
+    current_state = dict(initial_state)
+    best_state = dict(initial_state)
+    best_obj = initial_obj
     
     num_blocks = len(prob_info['blocks'])
     num_remove = max(1, int(num_blocks * 0.20))
     
-    # 3. Simulated Annealing 시작 온도 설정
-    T = 1000.0
+    # 3. Time-based Dynamic SA Cooling Parameters
+    T_start = 1000.0
+    T_end = 0.01
     
-    # 3. ALNS 가중치 초기화
     alns_weights = [1.0, 1.0, 1.0]
     
-    while time.time() - start_time < 55.0:
+    while True:
+        elapsed = time.time() - start_time
+        if elapsed >= alns_duration:
+            break
+            
+        progress = elapsed / alns_duration
+        progress = max(0.0, min(1.0, progress))
+        
+        # 수식: T(t) = T_start * (T_end / T_start) ^ progress
+        T = T_start * ((T_end / T_start) ** progress)
+        
         # ALNS 룰렛 휠 선택
         operator = random.choices([0, 1, 2], weights=alns_weights)[0]
         if operator == 0:
@@ -535,11 +550,53 @@ def algorithm(prob_info, timelimit=60):
                 else:
                     current_state = dict(best_state)
             
-            # 온도 감쇠 (Cooling schedule)
-            T *= 0.95
-            
         # ALNS 가중치 업데이트
         alns_weights[operator] = alns_weights[operator] * 0.9 + score * 0.1
+        
+    return best_obj, best_state
+
+def algorithm(prob_info, timelimit=60):
+    start_time = time.time()
+    
+    bays_info = prob_info['bays']
+    bays = [Bay(width=b['width'], height=b['height'], id=i) for i, b in enumerate(bays_info)]
+    
+    initial_state = initialization(prob_info, bays, timelimit, start_time)
+    initial_obj = compute_objective_val(prob_info, bays, initial_state)
+    
+    # 워커당 ALNS 탐색에 사용할 시간 (제한 시간의 90%)
+    alns_duration = timelimit * 0.90
+    
+    workers_count = 4
+    
+    # Python multiprocessing pool을 이용해 워커 병렬 실행
+    # (윈도우 환경 등의 제약으로 Pool 생성 시 context 문제가 있을 수 있어, 
+    # 여기서는 제출 스크립트 실행의 안전성을 위해 단일 실행 환경도 대응하도록 처리)
+    try:
+        pool = multiprocessing.Pool(processes=workers_count)
+        async_results = []
+        for i in range(workers_count):
+            seed = int(time.time() * 1000) + i
+            res = pool.apply_async(alns_worker, (prob_info, bays, initial_state, initial_obj, timelimit, start_time, seed, alns_duration))
+            async_results.append(res)
+            
+        pool.close()
+        pool.join()
+        
+        best_global_obj = initial_obj
+        best_global_state = dict(initial_state)
+        
+        for res in async_results:
+            try:
+                worker_obj, worker_state = res.get()
+                if worker_obj < best_global_obj:
+                    best_global_obj = worker_obj
+                    best_global_state = worker_state
+            except Exception:
+                pass
+    except Exception:
+        # 혹시 멀티프로세싱 환경 지원이 안 될 경우 1개의 워커만 폴백으로 실행
+        best_global_obj, best_global_state = alns_worker(prob_info, bays, initial_state, initial_obj, timelimit, start_time, 0, alns_duration)
                     
-    best_state = post_optimize_time(best_state, prob_info, bays)
+    best_state = post_optimize_time(best_global_state, prob_info, bays, start_time, timelimit)
     return format_solution(best_state)

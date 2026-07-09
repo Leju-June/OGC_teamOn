@@ -5,6 +5,14 @@ import time
 from baseline_cpsat.myalgorithm import algorithm
 from baseline_cpsat.utils import check_feasibility
 
+# ==============================================================================
+# 실행 시간 제한 (Time Limit) 설정 
+# ==============================================================================
+# 서버에서 주어지는 제한 시간에 맞춰 아래 값을 자유롭게 변경하며 테스트해 보세요.
+# 기본값: 60 (초)
+TIME_LIMIT = 60
+# ==============================================================================
+
 def main():
     train_dir = 'train'
     prob_files = sorted(glob.glob(os.path.join(train_dir, 'prob_*.json')), key=lambda x: int(os.path.basename(x).split('_')[1].split('.')[0]))
@@ -12,7 +20,7 @@ def main():
     results = []
     
     print("=========================================================================================================")
-    print(" Starting Full 60s Test Run for All 20 Problems (ALNS + CP-SAT)")
+    print(f" Starting Full {TIME_LIMIT}s Test Run for All Problems (ALNS + CP-SAT, Multiprocessing)")
     print("=========================================================================================================")
     print(f"| {'Problem':<12} | {'Status':<6} | {'Feasible':<8} | {'Total Score':>14} | {'Obj1(Tard)':>14} | {'Obj2(Bal)':>10} | {'Obj3(Pref)':>10} | {'Time(s)':>8} |")
     print("|" + "-"*14 + "|" + "-"*8 + "|" + "-"*10 + "|" + "-"*16 + "|" + "-"*16 + "|" + "-"*12 + "|" + "-"*12 + "|" + "-"*10 + "|")
@@ -25,7 +33,7 @@ def main():
                 prob_info = json.load(f)
                 
             start_t = time.time()
-            solution = algorithm(prob_info, timelimit=60)
+            solution = algorithm(prob_info, timelimit=TIME_LIMIT)
             elapsed = time.time() - start_t
             
             feas_result = check_feasibility(prob_info, solution)
