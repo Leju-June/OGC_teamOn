@@ -32,7 +32,7 @@ def _empty_bay_entry(schedule_in_bay, r_time, proc):
 
 def check_obstruction(new_blk, entry_time, exit_time, bay, bay_placed, bay_schedule):
     for p_blk, (p_entry, p_exit) in zip(bay_placed, bay_schedule):
-        if entry_time < p_entry < exit_time:
+        if entry_time <= p_entry < exit_time:
             if check_entry(bay, [new_blk], p_blk, fast=True):
                 return True
         if entry_time < p_exit <= exit_time:
@@ -129,10 +129,7 @@ def compute_objective_val(prob_info, bays, state):
         
         layers = _resolve_layers(b_info['shape'][o_idx]['layers'])
         if layers:
-            bb = _bounding_box(_anchor_verts(layers[0]))
-            bw = math.ceil(bb[2])
-            bh = math.ceil(bb[3])
-            bay_workloads[bay_id] += (bw * bh * b_info['processing_time'])
+            bay_workloads[bay_id] += b_info.get('workload', 0)
             
     obj2 = 0
     for i in range(len(bays)):
@@ -253,7 +250,7 @@ def destroy_workload(state, prob_info, bays, num_remove):
     bay_workloads = [0] * len(bays)
     for b_id, (bay_id, x, y, o_idx, entry, exit_t) in state.items():
         b_info = prob_info['blocks'][b_id]
-        bay_workloads[bay_id] += b_info['processing_time']
+        bay_workloads[bay_id] += b_info.get('workload', 0)
     
     total_area = sum(b.width * b.height for b in bays)
     avg_area = total_area / len(bays) if bays else 1.0
@@ -268,6 +265,33 @@ def destroy_workload(state, prob_info, bays, num_remove):
         
     return set(random.sample(candidates, min(num_remove, len(candidates))))
 
+def destroy_tardiness(state, prob_info, num_remove):
+    # 2. 지연 파괴 (Tardiness Destroy) 연산자
+    tardiness_scores = []
+    for b_id, (bay_id, x, y, o_idx, entry, exit_t) in state.items():
+        tard = max(0, exit_t - prob_info['blocks'][b_id]['due_date'])
+        tardiness_scores.append((b_id, tard))
+        
+    tardiness_scores.sort(key=lambda item: item[1], reverse=True)
+    
+    candidates = [b_id for b_id, tard in tardiness_scores if tard > 0]
+    
+    if not candidates:
+        return destroy_random(state, num_remove)
+        
+    selected = set()
+    for b_id, tard in tardiness_scores:
+        if tard > 0:
+            selected.add(b_id)
+            if len(selected) >= num_remove:
+                break
+    
+    if len(selected) < num_remove:
+        remaining = set(state.keys()) - selected
+        selected.update(random.sample(list(remaining), min(num_remove - len(selected), len(remaining))))
+        
+    return selected
+
 def is_conflict(c1, c2, prob_info, bays):
     if c1['bay'] != c2['bay']: return False
     if not _time_overlaps(c1['entry'], c1['exit'], c2['entry'], c2['exit']):
@@ -279,14 +303,14 @@ def is_conflict(c1, c2, prob_info, bays):
     
     if check_collisions(bay, [blk1, blk2]): return True
     
-    if c2['entry'] < c1['entry'] < c2['exit']:
+    if c2['entry'] <= c1['entry'] < c2['exit']:
         if check_entry(bay, [blk2], blk1, fast=True): return True
-    if c1['entry'] < c2['entry'] < c1['exit']:
+    if c1['entry'] <= c2['entry'] < c1['exit']:
         if check_entry(bay, [blk1], blk2, fast=True): return True
         
-    if c2['entry'] < c1['exit'] < c2['exit']:
+    if c2['entry'] < c1['exit'] <= c2['exit']:
         if check_exit(bay, [blk2], blk1, fast=True): return True
-    if c1['entry'] < c2['exit'] < c1['exit']:
+    if c1['entry'] < c2['exit'] <= c1['exit']:
         if check_exit(bay, [blk1], blk2, fast=True): return True
         
     return False
@@ -317,8 +341,19 @@ def generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, num=10):
         if min_x > max_x or min_y > max_y:
             continue
         
-        x = random.randint(min_x, max_x)
-        y = random.randint(min_y, max_y)
+        # 2. 기하학적 코너 앵커링 휴리스틱 (Corner Anchoring)
+        corners = [
+            (min_x, min_y),
+            (max_x, min_y),
+            (min_x, max_y),
+            (max_x, max_y)
+        ]
+        
+        if attempts <= 4:
+            x, y = corners[(attempts - 1) % 4]
+        else:
+            x = random.randint(min_x, max_x)
+            y = random.randint(min_y, max_y)
         
         new_blk = Block(block_id=b_id, block_data=b_info, x=x, y=y, orient_idx=o_idx)
         
@@ -334,15 +369,21 @@ def generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, num=10):
 def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
     bay_placed = {bay.id: [] for bay in bays}
     bay_schedule = {bay.id: [] for bay in bays}
+    bay_workloads = [0] * len(bays)
     for b_id, (bay_id, x, y, o_idx, entry, exit_t) in fixed_state.items():
         blk = Block(block_id=b_id, block_data=prob_info['blocks'][b_id], x=x, y=y, orient_idx=o_idx)
         bay_placed[bay_id].append(blk)
         bay_schedule[bay_id].append((entry, exit_t))
+        bay_workloads[bay_id] += prob_info['blocks'][b_id].get('workload', 0)
+        
+    total_area = sum(b.width * b.height for b in bays)
+    avg_area = total_area / len(bays) if bays else 1.0
+    u_factors = [avg_area / (b.width * b.height) for b in bays]
         
     candidates_by_block = {}
     for b_id in U:
         b_info = prob_info['blocks'][b_id]
-        cands = generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, num=5)
+        cands = generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, num=15)
         if not cands: return None
         candidates_by_block[b_id] = cands
         
@@ -375,7 +416,12 @@ def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
         for c_idx, cand in enumerate(cands):
             tard = max(0, cand['exit'] - prob_info['blocks'][b_id]['due_date'])
             pref = max(prob_info['blocks'][b_id]['bay_preferences']) - prob_info['blocks'][b_id]['bay_preferences'][cand['bay']]
-            score = int((w1 * tard + w3 * pref) * 100)
+            
+            # 4. CP-SAT 목적함수에 Obj2(Workload 불균형) Proxy 점수 반영
+            bay_id = cand['bay']
+            proxy_obj2_penalty = u_factors[bay_id] * bay_workloads[bay_id]
+            
+            score = int((w1 * tard + w3 * pref + w2 * proxy_obj2_penalty * 0.001) * 100)
             obj_vars.append(X[(b_id, c_idx)] * score)
             
     model.Minimize(sum(obj_vars))
@@ -393,6 +439,56 @@ def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
         return new_state
     return None
 
+def post_optimize_time(state, prob_info, bays, start_time, timelimit):
+    # 4. 후처리 시간 당기기 최적화 (Post-Optimization Local Search)
+    new_state = dict(state)
+    changed = True
+    while changed:
+        changed = False
+        for b_id in sorted(new_state.keys(), key=lambda k: new_state[k][5]):
+            if time.time() - start_time > timelimit - 0.5:
+                return new_state
+                
+            bay_id, x, y, o_idx, entry, exit_t = new_state[b_id]
+            b_info = prob_info['blocks'][b_id]
+            r_time = b_info['release_time']
+            if entry > r_time:
+                other_blocks = {}
+                for ob_id, ob_data in new_state.items():
+                    if ob_id != b_id and ob_data[0] == bay_id:
+                        other_blocks[ob_id] = {
+                            'id': ob_id, 'bay': ob_data[0], 'x': ob_data[1], 'y': ob_data[2], 'o_idx': ob_data[3], 'entry': ob_data[4], 'exit': ob_data[5]
+                        }
+                        
+                best_entry = entry
+                best_exit = exit_t
+                curr_entry = entry - 1
+                curr_exit = exit_t - 1
+                
+                while curr_entry >= r_time:
+                    cand = {'id': b_id, 'bay': bay_id, 'x': x, 'y': y, 'o_idx': o_idx, 'entry': curr_entry, 'exit': curr_exit}
+                    has_conflict = False
+                    for ob_id, ob_data in other_blocks.items():
+                        if is_conflict(cand, ob_data, prob_info, bays):
+                            has_conflict = True
+                            break
+                    if not has_conflict:
+                        best_entry = curr_entry
+                        best_exit = curr_exit
+                        curr_entry -= 1
+                        curr_exit -= 1
+                    else:
+                        break
+                        
+                if best_entry < entry:
+                    new_state[b_id] = (bay_id, x, y, o_idx, best_entry, best_exit)
+                    changed = True
+                    
+        if time.time() - start_time > timelimit - 0.5:
+            break
+            
+    return new_state
+
 def algorithm(prob_info, timelimit=60):
     start_time = time.time()
     
@@ -404,31 +500,53 @@ def algorithm(prob_info, timelimit=60):
     best_obj = compute_objective_val(prob_info, bays, best_state)
     
     num_blocks = len(prob_info['blocks'])
-    num_remove = max(1, int(num_blocks * 0.15))
+    num_remove = max(1, int(num_blocks * 0.20))
     
-    while time.time() - start_time < timelimit * 0.8:
-        operator = random.choices([0, 1], weights=[0.5, 0.5])[0]
+    # 3. Simulated Annealing 시작 온도 설정
+    T = 1000.0
+    
+    # 3. ALNS 가중치 초기화
+    alns_weights = [1.0, 1.0, 1.0]
+    
+    while time.time() - start_time < timelimit * 0.95:
+        # ALNS 룰렛 휠 선택
+        operator = random.choices([0, 1, 2], weights=alns_weights)[0]
         if operator == 0:
             removed = destroy_random(current_state, num_remove)
-        else:
+        elif operator == 1:
             removed = destroy_workload(current_state, prob_info, bays, num_remove)
+        else:
+            removed = destroy_tardiness(current_state, prob_info, num_remove)
             
         fixed_state = {k: v for k, v in current_state.items() if k not in removed}
         
-        # 2 seconds per CP-SAT iteration to allow many iterations
-        new_state = repair_cpsat(removed, fixed_state, prob_info, bays, time_limit=2.0)
+        new_state = repair_cpsat(removed, fixed_state, prob_info, bays, time_limit=3.0)
         
+        score = 0
         if new_state:
             new_obj = compute_objective_val(prob_info, bays, new_state)
             if new_obj < best_obj:
                 best_state = dict(new_state)
                 best_obj = new_obj
                 current_state = dict(new_state)
+                score = 10
             else:
-                # Accept slightly worse solutions with small probability
-                if random.random() < 0.1:
+                # 3. Simulated Annealing 해 수용 확률 적용 (Metropolis)
+                current_obj = compute_objective_val(prob_info, bays, current_state)
+                if new_obj < current_obj:
                     current_state = dict(new_state)
+                    score = 5
+                elif random.random() < math.exp((current_obj - new_obj) / T):
+                    current_state = dict(new_state)
+                    score = 2
                 else:
                     current_state = dict(best_state)
+            
+            # 온도 감쇠 (Cooling schedule)
+            T *= 0.95
+            
+        # ALNS 가중치 업데이트
+        alns_weights[operator] = alns_weights[operator] * 0.9 + score * 0.1
                     
+    best_state = post_optimize_time(best_state, prob_info, bays, start_time, timelimit)
     return format_solution(best_state)

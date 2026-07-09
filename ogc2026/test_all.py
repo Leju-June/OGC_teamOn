@@ -11,8 +11,11 @@ def main():
     
     results = []
     
-    print("| Problem | Status | Feasible | Total Score | Obj1 (Tardiness) | Obj2 (Balance) | Obj3 (Pref) | Time (s) |")
-    print("|---------|--------|----------|-------------|------------------|----------------|-------------|----------|")
+    print("=========================================================================================================")
+    print(" Starting Full 60s Test Run for All 20 Problems (ALNS + CP-SAT)")
+    print("=========================================================================================================")
+    print(f"| {'Problem':<12} | {'Status':<6} | {'Feasible':<8} | {'Total Score':>14} | {'Obj1(Tard)':>14} | {'Obj2(Bal)':>10} | {'Obj3(Pref)':>10} | {'Time(s)':>8} |")
+    print("|" + "-"*14 + "|" + "-"*8 + "|" + "-"*10 + "|" + "-"*16 + "|" + "-"*16 + "|" + "-"*12 + "|" + "-"*12 + "|" + "-"*10 + "|")
     
     for prob_file in prob_files:
         prob_name = os.path.basename(prob_file)
@@ -22,7 +25,7 @@ def main():
                 prob_info = json.load(f)
                 
             start_t = time.time()
-            solution = algorithm(prob_info, timelimit=8)
+            solution = algorithm(prob_info, timelimit=60)
             elapsed = time.time() - start_t
             
             feas_result = check_feasibility(prob_info, solution)
@@ -33,16 +36,15 @@ def main():
                 obj1 = feas_result['obj1']
                 obj2 = feas_result['obj2']
                 obj3 = feas_result['obj3']
-                print(f"| {prob_name} | OK | {'Yes' if feasible else 'No'} | {obj:,.1f} | {obj1:,.1f} | {obj2:,.1f} | {obj3:,.1f} | {elapsed:.1f} |", flush=True)
+                print(f"| {prob_name:<12} | {'OK':<6} | {'Yes':<8} | {obj:>14,.1f} | {obj1:>14,.1f} | {obj2:>10,.1f} | {obj3:>10,.1f} | {elapsed:>8.1f} |", flush=True)
                 results.append((prob_name, "OK", feasible, obj, obj1, obj2, obj3, elapsed))
             else:
                 stage = feas_result.get('stage', 'Unknown')
-                violations = feas_result.get('violations', [])
-                print(f"| {prob_name} | FAIL | No (Stage {stage}) | - | - | - | - | {elapsed:.1f} |", flush=True)
+                print(f"| {prob_name:<12} | {'FAIL':<6} | {f'No(S{stage})':<8} | {'-':>14} | {'-':>14} | {'-':>10} | {'-':>10} | {elapsed:>8.1f} |", flush=True)
                 results.append((prob_name, f"FAIL (Stage {stage})", False, None, None, None, None, elapsed))
                 
         except Exception as e:
-            print(f"| {prob_name} | ERROR | - | - | - | - | - | - |", flush=True)
+            print(f"| {prob_name:<12} | {'ERROR':<6} | {'-':<8} | {'-':>14} | {'-':>14} | {'-':>10} | {'-':>10} | {'-':>8} |", flush=True)
             results.append((prob_name, f"ERROR: {str(e)}", False, None, None, None, None, 0))
 
 if __name__ == '__main__':
