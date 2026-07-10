@@ -10,13 +10,14 @@ from baseline_cpsat.utils import check_feasibility
 # 실행 설정 (Configuration)
 # ==============================================================================
 # 서버에서 주어지는 제한 시간에 맞춰 아래 값을 자유롭게 변경하며 테스트해 보세요.
-TIME_LIMIT = 120       # 각 문제당 실행 제한 시간 (초)
-NUM_RUNS = 10         # 전체 예제들을 반복 실행할 횟수
+TIME_LIMIT = 1       # 각 문제당 실행 제한 시간 (초)
+NUM_RUNS = 1         # 전체 예제들을 반복 실행할 횟수
 CSV_FILENAME = 'test_results_120s.csv'  # 결과를 저장할 CSV 파일명
 # ==============================================================================
 
 def main():
-    train_dir = 'train'
+    # 상위 폴더의 train 디렉토리를 가리키도록 수정 (40개 예제 포함)
+    train_dir = '../train'
     # prob_1 ~ prob_40 자동 감지 및 정렬
     prob_files = sorted(glob.glob(os.path.join(train_dir, 'prob_*.json')), key=lambda x: int(os.path.basename(x).split('_')[1].split('.')[0]))
     
