@@ -10,9 +10,9 @@ from baseline_cpsat.utils import check_feasibility
 # 실행 설정 (Configuration)
 # ==============================================================================
 # 서버에서 주어지는 제한 시간에 맞춰 아래 값을 자유롭게 변경하며 테스트해 보세요.
-TIME_LIMIT = 1       # 각 문제당 실행 제한 시간 (초)
-NUM_RUNS = 1         # 전체 예제들을 반복 실행할 횟수
-CSV_FILENAME = 'test_results_120s.csv'  # 결과를 저장할 CSV 파일명
+TIME_LIMIT = 60       # 각 문제당 실행 제한 시간 (초)
+NUM_RUNS = 12         # 전체 예제들을 반복 실행할 횟수
+CSV_FILENAME = 'test_results_60s.csv'  # 결과를 저장할 CSV 파일명
 # ==============================================================================
 
 def main():

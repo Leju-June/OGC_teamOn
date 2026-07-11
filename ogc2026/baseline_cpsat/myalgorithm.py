@@ -17,9 +17,11 @@ from shapely.geometry import Polygon as ShapelyPolygon
 from shapely import affinity
 
 def _time_overlaps(a_entry, a_exit, b_entry, b_exit):
+    """두 블록의 점유 시간 [entry, exit)이 겹치는지 확인하는 헬퍼 함수"""
     return a_entry < b_exit and b_entry < a_exit
 
 def _empty_bay_entry(schedule_in_bay, r_time, proc):
+    """빈 공간에 블록을 밀어넣기 위해, 스케줄과 겹치지 않는 가장 빠른 진입 시간 계산"""
     entry = int(r_time)
     changed = True
     while changed:
@@ -32,6 +34,7 @@ def _empty_bay_entry(schedule_in_bay, r_time, proc):
     return entry
 
 def check_obstruction(new_blk, entry_time, exit_time, bay, bay_placed, bay_schedule):
+    """시간이 겹치지 않더라도, 다른 블록이 크레인의 수직 이동 경로(Entry/Exit)를 방해하는지 기하학적으로 검사"""
     for p_blk, (p_entry, p_exit) in zip(bay_placed, bay_schedule):
         if entry_time <= p_entry < exit_time:
             if check_entry(bay, [new_blk], p_blk, fast=True):
@@ -42,6 +45,7 @@ def check_obstruction(new_blk, entry_time, exit_time, bay, bay_placed, bay_sched
     return False
 
 def find_latest_slot(new_blk, bay, bay_placed, bay_schedule, r_time, p_time, due_date):
+    """납기일(due_date)을 거꾸로 거슬러 올라가며(Backward Search) 지연(Tardiness)이 0이 되는 최적의 진입 시간 탐색"""
     exit_t = due_date
     entry = exit_t - p_time
     while entry >= r_time:
@@ -64,6 +68,7 @@ def find_latest_slot(new_blk, bay, bay_placed, bay_schedule, r_time, p_time, due
     return None, None
 
 def find_earliest_tardy_slot(new_blk, bay, bay_placed, bay_schedule, r_time, p_time, due_date):
+    """납기일 내 배치가 불가능할 경우, 지연(Tardiness)을 최소화하기 위해 앞쪽부터 탐색(Forward Search)하여 가장 빠른 빈 시간 탐색"""
     entry = max(r_time, due_date - p_time + 1)
     limit = max([e for a, e in bay_schedule] + [0]) + p_time if bay_schedule else r_time + p_time
     limit = max(entry + 100, limit + 50)
@@ -88,6 +93,7 @@ def find_earliest_tardy_slot(new_blk, bay, bay_placed, bay_schedule, r_time, p_t
     return None, None
 
 def format_solution(state):
+    """내부 상태(Dictionary)를 문제에서 요구하는 제출 양식(JSON Operations)에 맞게 변환"""
     ops_by_time = defaultdict(list)
     for b_id, (bay_id, x, y, o_idx, entry, exit_t) in state.items():
         ops_by_time[exit_t].append({
@@ -113,6 +119,7 @@ def format_solution(state):
     return solution
 
 def compute_objective_val(prob_info, bays, state):
+    """현재 상태(state)의 전체 목적 함수 값(Tardiness, Balance, Preference)을 가중치에 맞게 계산"""
     w = prob_info['weights']
     w1, w2, w3 = w['w1'], w['w2'], w['w3']
     total_area = sum(b.width * b.height for b in bays)
@@ -142,6 +149,7 @@ def compute_objective_val(prob_info, bays, state):
     return w1 * obj1 + w2 * obj2 + w3 * obj3
 
 def initialization(prob_info, bays, timelimit, start_time):
+    """납기일(Due Date)이 빠른 순서대로 블록을 정렬한 뒤, 휴리스틱을 사용해 최초의 유효한 해(Initial Feasible Solution) 생성"""
     blocks_info = prob_info['blocks']
     sorted_bids = sorted(range(len(blocks_info)), key=lambda i: blocks_info[i]['due_date'], reverse=True)
     
@@ -244,9 +252,11 @@ def initialization(prob_info, bays, timelimit, start_time):
     return state
 
 def destroy_random(state, num_remove):
+    """ALNS 파괴 연산자 1: 현재 배치된 블록 중 무작위로 일정 개수(num_remove) 제거"""
     return set(random.sample(list(state.keys()), min(num_remove, len(state))))
 
 def destroy_workload(state, prob_info, bays, num_remove):
+    """ALNS 파괴 연산자 2: 워크로드 편차가 가장 심한(불균형한) 베이(Bay)를 찾아 해당 베이의 블록들을 집중적으로 제거"""
     # Find bay with highest workload penalty
     bay_workloads = [0] * len(bays)
     for b_id, (bay_id, x, y, o_idx, entry, exit_t) in state.items():
@@ -267,6 +277,7 @@ def destroy_workload(state, prob_info, bays, num_remove):
     return set(random.sample(candidates, min(num_remove, len(candidates))))
 
 def destroy_tardiness(state, prob_info, num_remove):
+    """ALNS 파괴 연산자 3: 납기 지연(Tardiness)이 가장 크게 발생하는 블록들을 우선적으로 제거하여 재배치 유도"""
     # 2. 지연 파괴 (Tardiness Destroy) 연산자
     tardiness_scores = []
     for b_id, (bay_id, x, y, o_idx, entry, exit_t) in state.items():
@@ -294,6 +305,7 @@ def destroy_tardiness(state, prob_info, num_remove):
     return selected
 
 def is_conflict(c1, c2, prob_info, bays):
+    """두 개의 후보 블록 배치(c1, c2) 간에 시간 및 기하학적 충돌(크레인 방해 포함)이 발생하는지 검사"""
     if c1['bay'] != c2['bay']: return False
     if not _time_overlaps(c1['entry'], c1['exit'], c2['entry'], c2['exit']):
         return False
@@ -317,6 +329,7 @@ def is_conflict(c1, c2, prob_info, bays):
     return False
 
 def generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, num=10):
+    """ALNS 수리(Repair) 과정에서 특정 블록이 들어갈 수 있는 다양한 배치 후보(공간+시간+방향)들을 휴리스틱을 통해 생성"""
     cands = []
     r_time = b_info['release_time']
     d_time = b_info['due_date']
@@ -368,6 +381,7 @@ def generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, num=10):
     return cands
 
 def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
+    """제거된 블록(U)들을 대상으로 여러 후보들을 생성한 뒤, CP-SAT Solver를 이용해 충돌이 없는 최적의 조합 탐색"""
     bay_placed = {bay.id: [] for bay in bays}
     bay_schedule = {bay.id: [] for bay in bays}
     bay_workloads = [0] * len(bays)
@@ -441,6 +455,7 @@ def repair_cpsat(U, fixed_state, prob_info, bays, time_limit):
     return None
 
 def post_optimize_time(state, prob_info, bays, start_time, timelimit):
+    """탐색 종료 후, 최종 배치 상태를 유지한 채 블록들의 작업 시간을 최대한 앞당겨(Forward Push) 지연을 한 번 더 최소화"""
     # 4. 후처리 시간 당기기 최적화 (Post-Optimization Local Search)
     new_state = dict(state)
     changed = True
@@ -491,6 +506,7 @@ def post_optimize_time(state, prob_info, bays, start_time, timelimit):
     return new_state
 
 def alns_worker(prob_info, bays, initial_state, initial_obj, timelimit, start_time, seed, alns_duration):
+    """멀티프로세싱 기반 병렬 탐색 워커. 고유한 난수 시드를 가지고 제한 시간 동안 ALNS + SA를 수행하여 최적의 해 반환"""
     random.seed(seed)
     
     current_state = dict(initial_state)
@@ -556,6 +572,7 @@ def alns_worker(prob_info, bays, initial_state, initial_obj, timelimit, start_ti
     return best_obj, best_state
 
 def algorithm(prob_info, timelimit=60):
+    """알고리즘의 메인 진입점. 4개의 병렬 워커(Multiprocessing)를 실행하고, 최고의 해를 취합하여 후처리 후 최종 결과 반환"""
     start_time = time.time()
     
     bays_info = prob_info['bays']
