@@ -18,7 +18,7 @@ HARD_TIME_LIMIT = 300        # 어려움 난이도 제한 시간
 VERY_HARD_TIME_LIMIT = 540  # 매우 어려움 난이도 제한 시간
 
 NUM_RUNS = 1                            # 각 문제별 실행 반복 횟수
-CSV_FILENAME = 'test_results_hard_run1.csv'  # 결과 저장 CSV
+CSV_FILENAME = 'test_results_hard_run1_patched.csv'  # 결과 저장 CSV
 # ==============================================================================
 
 def main():
