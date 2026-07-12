@@ -1,0 +1,14 @@
+Run,Problem,Difficulty,TimeLimit,Status,Feasible,Total Score,Obj1(Tard),Obj2(Bal),Obj3(Pref),Time(s)
+1,prob_13.json,Hard,300,OK,Yes,1130726.0,49.0,2001,1572.0,275.5
+1,prob_23.json,Hard,300,OK,Yes,47947577.0,3528.0,375,544.0,289.7
+1,prob_24.json,Hard,300,FAIL,No(S5),,,,,284.5
+1,prob_25.json,Hard,300,OK,Yes,4135543.0,6168.0,1047,1022.0,291.0
+1,prob_26.json,Very Hard,540,OK,Yes,20128959.0,1461.0,2778,4200.0,511.9
+1,prob_27.json,Very Hard,540,OK,Yes,106300213.0,7841.0,880,4386.0,539.5
+1,prob_28.json,Very Hard,540,OK,Yes,85666745.0,6386.0,2269,1718.0,502.7
+1,prob_30.json,Hard,300,FAIL,No(S5),,,,,280.0
+1,prob_31.json,Very Hard,540,OK,Yes,18778344.0,1212.0,8993,9707.0,498.1
+1,prob_32.json,Very Hard,540,FAIL,No(S5),,,,,504.9
+1,prob_33.json,Very Hard,540,OK,Yes,16082900.0,2320.0,1546,4000.0,526.8
+1,prob_35.json,Hard,300,OK,Yes,52190841.0,3892.0,1711,1935.0,284.9
+1,prob_37.json,Very Hard,540,OK,Yes,9126316.0,2004.0,1846,4066.0,502.4
