@@ -133,6 +133,35 @@ class RasterCache:
                     valid.append((x * self.scale, y * self.scale, touch_score))
         return valid
 
+def check_pos_valid(x, y, entry, exit_t, b_id, b_info, bay, bay_placed, bay_schedule, o_idx):
+    new_blk = Block(block_id=b_id, block_data=b_info, x=x, y=y, orient_idx=o_idx)
+    bb = new_blk.bounding_rect()
+    if bb[0] < 0 or bb[1] < 0 or bb[2] > bay.width or bb[3] > bay.height:
+        return False
+        
+    p_in = []
+    p_out = []
+    for p_blk, (p_e, p_ex) in zip(bay_placed, bay_schedule):
+        if _time_overlaps(entry, exit_t, p_e, p_ex):
+            if check_collisions(bay, [new_blk, p_blk]):
+                return False
+        if p_e < entry < p_ex:
+            p_in.append(p_blk)
+        if p_e < exit_t < p_ex:
+            p_out.append(p_blk)
+            
+    if p_in and check_entry(bay, p_in, new_blk, fast=True): return False
+    if p_out and check_exit(bay, p_out, new_blk, fast=True): return False
+    
+    # Check if new_blk obstructs others
+    for p_blk, (p_e, p_ex) in zip(bay_placed, bay_schedule):
+        if entry <= p_e < exit_t:
+            if check_entry(bay, [new_blk], p_blk, fast=True): return False
+        if entry < p_ex <= exit_t:
+            if check_exit(bay, [new_blk], p_blk, fast=True): return False
+            
+    return True
+
 def search_placement(b_id, b_info, bay, bay_placed, bay_schedule, r_time, p_time, due_date, o_idx, raster_cache, mode='backward'):
     if mode == 'backward':
         entry = max(r_time, due_date - p_time)
@@ -146,29 +175,29 @@ def search_placement(b_id, b_info, bay, bay_placed, bay_schedule, r_time, p_time
         limit = max([e for a, e in bay_schedule] + [0]) + p_time if bay_schedule else r_time + p_time
         limit = max(entry + 100, limit + 50)
 
+    dummy_blk = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=o_idx)
+    lx0, ly0, lx1, ly1 = dummy_blk.bounding_rect()
+    min_x = max(0, int(math.ceil(-lx0)))
+    max_x = int(math.floor(bay.width - lx1))
+    min_y = max(0, int(math.ceil(-ly0)))
+    max_y = int(math.floor(bay.height - ly1))
+    
     while (entry >= limit if mode == 'backward' else entry <= limit):
         grid, gw, gh = raster_cache.build_bay_grid(bay.id, bay_placed, bay_schedule, entry, exit_t)
         b_mask, bw, bh, blx0, bly0 = raster_cache.get_block_mask(b_id, o_idx)
         spots = raster_cache.find_valid_spots(grid, gw, gh, b_mask, bw, bh)
         spots.sort(key=lambda v: v[2], reverse=True)
         
-        for gx, gy, score in spots[:5]:  # LIMIT to top 5 to prevent extreme slowness
-            new_blk = Block(block_id=b_id, block_data=b_info, x=gx, y=gy, orient_idx=o_idx)
-            # Full collision check
-            has_col = False
-            for p_blk, (p_e, p_ex) in zip(bay_placed, bay_schedule):
-                if _time_overlaps(entry, exit_t, p_e, p_ex):
-                    if check_collisions(bay, [new_blk, p_blk]):
-                        has_col = True; break
-            if not has_col:
-                p_in = [b for b, (a,e) in zip(bay_placed, bay_schedule) if a <= entry < e]
-                if not check_entry(bay, p_in, new_blk, fast=True):
-                    p_out = [new_blk] + [b for b, (a,e) in zip(bay_placed, bay_schedule) if a <= exit_t < e]
-                    if not check_exit(bay, p_out, new_blk, fast=True):
-                        if not check_obstruction(new_blk, entry, exit_t, bay, bay_placed, bay_schedule):
-                            return gx, gy, entry, exit_t
+        for gx, gy, score in spots[:5]:
+            actual_x = max(min_x, min(max_x, int(round(gx - blx0))))
+            actual_y = max(min_y, min(max_y, int(round(gy - bly0))))
+            
+            if check_pos_valid(actual_x, actual_y, entry, exit_t, b_id, b_info, bay, bay_placed, bay_schedule, o_idx):
+                return actual_x, actual_y, entry, exit_t
+            
         entry += step
         exit_t += step
+        
     return None, None, None, None
 
 def format_solution(state):
@@ -233,14 +262,35 @@ def initialization_strategy(prob_info, bays, timelimit, start_time, sort_strateg
         
         if time.time() - start_time > timelimit * 0.15:
             # Fallback immediately
-            bay_id = bay_order[0]
-            bay = bays[bay_id]
-            entry = _empty_bay_entry(bay_schedule[bay_id], r_time, p_time)
+            best_bay, best_o, best_x, best_y = bay_order[0], 0, 0, 0
+            found_fit = False
+            for b_idx in bay_order:
+                bay = bays[b_idx]
+                for o_idx in range(len(b_info['shape'])):
+                    dummy = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=o_idx)
+                    lx0, ly0, lx1, ly1 = dummy.bounding_rect()
+                    min_x = max(0, int(math.ceil(-lx0)))
+                    max_x = int(math.floor(bay.width - lx1))
+                    min_y = max(0, int(math.ceil(-ly0)))
+                    max_y = int(math.floor(bay.height - ly1))
+                    if min_x <= max_x and min_y <= max_y:
+                        best_bay, best_o, best_x, best_y = b_idx, o_idx, min_x, min_y
+                        found_fit = True
+                        break
+                if found_fit: break
+            
+            if not found_fit:
+                bay = bays[bay_order[0]]
+                dummy = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=0)
+                lx0, ly0, lx1, ly1 = dummy.bounding_rect()
+                best_x, best_y = max(0, int(math.ceil(-lx0))), max(0, int(math.ceil(-ly0)))
+
+            entry = _empty_bay_entry(bay_schedule[best_bay], r_time, p_time)
             exit_t = entry + p_time
-            new_blk = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=0)
-            state[b_id] = (bay_id, 0, 0, 0, entry, exit_t)
-            bay_placed[bay_id].append(new_blk)
-            bay_schedule[bay_id].append((entry, exit_t))
+            new_blk = Block(block_id=b_id, block_data=b_info, x=best_x, y=best_y, orient_idx=best_o)
+            state[b_id] = (best_bay, best_x, best_y, best_o, entry, exit_t)
+            bay_placed[best_bay].append(new_blk)
+            bay_schedule[best_bay].append((entry, exit_t))
             continue
             
         best_cand = None
@@ -249,18 +299,13 @@ def initialization_strategy(prob_info, bays, timelimit, start_time, sort_strateg
         for bay_idx in bay_order:
             bay = bays[bay_idx]
             for o_idx in range(len(b_info['shape'])):
-                gx, gy, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'backward')
-                if entry is None:
-                    gx, gy, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'forward')
-                    
+                gx, gy, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay_idx], bay_schedule[bay_idx], r_time, p_time, d_time, o_idx, raster_cache, 'forward')
                 if entry is not None:
                     tard = max(0, exit_t - d_time)
                     if tard < best_tard:
                         best_tard = tard
-                        best_cand = (bay.id, gx, gy, o_idx, entry, exit_t)
-                    if best_tard == 0: break
-            if best_tard == 0: break
-            
+                        best_cand = (bay_idx, gx, gy, o_idx, entry, exit_t)
+        
         if best_cand:
             bay_id, gx, gy, o_idx, entry, exit_t = best_cand
             new_blk = Block(block_id=b_id, block_data=b_info, x=gx, y=gy, orient_idx=o_idx)
@@ -269,14 +314,35 @@ def initialization_strategy(prob_info, bays, timelimit, start_time, sort_strateg
             bay_schedule[bay_id].append((entry, exit_t))
         else:
             # Fallback
-            bay_id = bay_order[0]
-            bay = bays[bay_id]
-            entry = _empty_bay_entry(bay_schedule[bay_id], r_time, p_time)
+            best_bay, best_o, best_x, best_y = bay_order[0], 0, 0, 0
+            found_fit = False
+            for b_idx in bay_order:
+                bay = bays[b_idx]
+                for o_idx in range(len(b_info['shape'])):
+                    dummy = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=o_idx)
+                    lx0, ly0, lx1, ly1 = dummy.bounding_rect()
+                    min_x = max(0, int(math.ceil(-lx0)))
+                    max_x = int(math.floor(bay.width - lx1))
+                    min_y = max(0, int(math.ceil(-ly0)))
+                    max_y = int(math.floor(bay.height - ly1))
+                    if min_x <= max_x and min_y <= max_y:
+                        best_bay, best_o, best_x, best_y = b_idx, o_idx, min_x, min_y
+                        found_fit = True
+                        break
+                if found_fit: break
+            
+            if not found_fit:
+                bay = bays[bay_order[0]]
+                dummy = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=0)
+                lx0, ly0, lx1, ly1 = dummy.bounding_rect()
+                best_x, best_y = max(0, int(math.ceil(-lx0))), max(0, int(math.ceil(-ly0)))
+
+            entry = _empty_bay_entry(bay_schedule[best_bay], r_time, p_time)
             exit_t = entry + p_time
-            new_blk = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=0)
-            state[b_id] = (bay_id, 0, 0, 0, entry, exit_t)
-            bay_placed[bay_id].append(new_blk)
-            bay_schedule[bay_id].append((entry, exit_t))
+            new_blk = Block(block_id=b_id, block_data=b_info, x=best_x, y=best_y, orient_idx=best_o)
+            state[b_id] = (best_bay, best_x, best_y, best_o, entry, exit_t)
+            bay_placed[best_bay].append(new_blk)
+            bay_schedule[best_bay].append((entry, exit_t))
             
     return state, compute_objective_val(prob_info, bays, state)
 
@@ -348,27 +414,32 @@ def generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, raster_cac
     for bay_idx in bay_order:
         bay = bays[bay_idx]
         for o_idx in range(len(b_info['shape'])):
+            dummy_blk = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=o_idx)
+            lx0, ly0, lx1, ly1 = dummy_blk.bounding_rect()
+            min_x = max(0, int(math.ceil(-lx0)))
+            max_x = int(math.floor(bay.width - lx1))
+            min_y = max(0, int(math.ceil(-ly0)))
+            max_y = int(math.floor(bay.height - ly1))
+            
             exit_t = d_time
             entry = exit_t - p_time
             grid, gw, gh = raster_cache.build_bay_grid(bay.id, bay_placed[bay.id], bay_schedule[bay.id], entry, exit_t)
             b_mask, bw, bh, blx0, bly0 = raster_cache.get_block_mask(b_id, o_idx)
             spots = raster_cache.find_valid_spots(grid, gw, gh, b_mask, bw, bh)
-            spots.sort(key=lambda v: v[2], reverse=True)
+            if not spots: continue
             
-            for gx, gy, score in spots[:5]:
-                new_blk = Block(block_id=b_id, block_data=b_info, x=gx, y=gy, orient_idx=o_idx)
-                has_col = False
-                for p_blk, (p_e, p_ex) in zip(bay_placed[bay.id], bay_schedule[bay.id]):
-                    if _time_overlaps(entry, exit_t, p_e, p_ex) and check_collisions(bay, [new_blk, p_blk]):
-                        has_col = True; break
-                if not has_col:
-                    p_in = [b for b, (a,e) in zip(bay_placed[bay.id], bay_schedule[bay.id]) if a <= entry < e]
-                    if not check_entry(bay, p_in, new_blk, fast=True):
-                        p_out = [new_blk] + [b for b, (a,e) in zip(bay_placed[bay.id], bay_schedule[bay.id]) if a <= exit_t < e]
-                        if not check_exit(bay, p_out, new_blk, fast=True):
-                            if not check_obstruction(new_blk, entry, exit_t, bay, bay_placed[bay.id], bay_schedule[bay.id]):
-                                cands.append({'id': b_id, 'bay': bay.id, 'x': gx, 'y': gy, 'o_idx': o_idx, 'entry': entry, 'exit': exit_t})
-                                if len(cands) >= num: return cands
+            spots.sort(key=lambda v: v[2], reverse=True)
+            chosen_spots = spots[:3]
+            if len(spots) > 3:
+                chosen_spots.extend(random.sample(spots[3:], min(2, len(spots) - 3)))
+                
+            for gx, gy, score in chosen_spots:
+                actual_x = max(min_x, min(max_x, int(round(gx - blx0))))
+                actual_y = max(min_y, min(max_y, int(round(gy - bly0))))
+                
+                if check_pos_valid(actual_x, actual_y, entry, exit_t, b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], o_idx):
+                    cands.append({'id': b_id, 'bay': bay.id, 'x': actual_x, 'y': actual_y, 'o_idx': o_idx, 'entry': entry, 'exit': exit_t})
+                    if len(cands) >= num: return cands
     
     if not cands: # fallback to earliest tardy
         for bay_idx in bay_order:
