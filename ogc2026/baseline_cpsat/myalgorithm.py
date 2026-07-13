@@ -34,17 +34,6 @@ def _empty_bay_entry(schedule_in_bay, r_time, proc):
                 changed = True
     return entry
 
-def check_obstruction(new_blk, entry_time, exit_time, bay, bay_placed, bay_schedule):
-    # 새 블록의 진입 및 진출 시점에 도면 내 다른 블록들과의 이동 경로 간섭을 검사
-    for p_blk, (p_entry, p_exit) in zip(bay_placed, bay_schedule):
-        if entry_time <= p_entry < exit_time:
-            if check_entry(bay, [new_blk], p_blk, fast=True):
-                return True
-        if entry_time < p_exit <= exit_time:
-            if check_exit(bay, [new_blk], p_blk, fast=True):
-                return True
-    return False
-
 class RasterCache:
     def __init__(self, prob_info, bays):
         # 블록과 도면의 비트마스킹 연산을 위한 캐시 객체를 초기화
@@ -161,7 +150,9 @@ def search_placement(b_id, b_info, bay, bay_placed, bay_schedule, r_time, p_time
         spots.sort(key=lambda v: v[2], reverse=True)
         
         for gx, gy, score in spots:
-            new_blk = Block(block_id=b_id, block_data=b_info, x=gx, y=gy, orient_idx=o_idx)
+            cx = int(math.ceil(gx - blx0))
+            cy = int(math.ceil(gy - bly0))
+            new_blk = Block(block_id=b_id, block_data=b_info, x=cx, y=cy, orient_idx=o_idx)
             # Full collision check
             has_col = False
             for p_blk, (p_e, p_ex) in zip(bay_placed, bay_schedule):
@@ -169,12 +160,19 @@ def search_placement(b_id, b_info, bay, bay_placed, bay_schedule, r_time, p_time
                     if check_collisions(bay, [new_blk, p_blk]):
                         has_col = True; break
             if not has_col:
-                p_in = [b for b, (a,e) in zip(bay_placed, bay_schedule) if a <= entry < e]
-                if not check_entry(bay, p_in, new_blk, fast=True):
-                    p_out = [new_blk] + [b for b, (a,e) in zip(bay_placed, bay_schedule) if a <= exit_t < e]
-                    if not check_exit(bay, p_out, new_blk, fast=True):
-                        if not check_obstruction(new_blk, entry, exit_t, bay, bay_placed, bay_schedule):
-                            return gx, gy, entry, exit_t
+                p_in = []
+                p_out = [new_blk]
+                obs_failed = False
+                for p_blk, (p_e, p_ex) in zip(bay_placed, bay_schedule):
+                    if p_e <= entry < p_ex: p_in.append(p_blk)
+                    if p_e <= exit_t < p_ex: p_out.append(p_blk)
+                    if entry <= p_e < exit_t and check_entry(bay, [new_blk], p_blk, fast=True):
+                        obs_failed = True; break
+                    if entry < p_ex <= exit_t and check_exit(bay, [new_blk], p_blk, fast=True):
+                        obs_failed = True; break
+                
+                if not obs_failed and not check_entry(bay, p_in, new_blk, fast=True) and not check_exit(bay, p_out, new_blk, fast=True):
+                    return cx, cy, entry, exit_t
         entry += step
         exit_t += step
     return None, None, None, None
@@ -304,21 +302,21 @@ def initialization_strategy(prob_info, bays, timelimit, start_time, sort_strateg
         for bay_idx in bay_order:
             bay = bays[bay_idx]
             for o_idx in range(len(b_info['shape'])):
-                gx, gy, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'backward')
+                x, y, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'backward')
                 if entry is None:
-                    gx, gy, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'forward')
+                    x, y, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'forward')
                     
                 if entry is not None:
                     tard = max(0, exit_t - d_time)
                     if tard < best_tard:
                         best_tard = tard
-                        best_cand = (bay.id, gx, gy, o_idx, entry, exit_t)
+                        best_cand = (bay.id, x, y, o_idx, entry, exit_t)
                     if best_tard == 0: break
             if best_tard == 0: break
             
         if best_cand:
-            bay_id, gx, gy, o_idx, entry, exit_t = best_cand
-            new_blk = Block(block_id=b_id, block_data=b_info, x=gx, y=gy, orient_idx=o_idx)
+            bay_id, x, y, o_idx, entry, exit_t = best_cand
+            new_blk = Block(block_id=b_id, block_data=b_info, x=x, y=y, orient_idx=o_idx)
             state[b_id] = best_cand
             bay_placed[bay_id].append(new_blk)
             bay_schedule[bay_id].append((entry, exit_t))
@@ -328,8 +326,11 @@ def initialization_strategy(prob_info, bays, timelimit, start_time, sort_strateg
             bay = bays[bay_id]
             entry = _empty_bay_entry(bay_schedule[bay_id], r_time, p_time)
             exit_t = entry + p_time
-            new_blk = Block(block_id=b_id, block_data=b_info, x=0, y=0, orient_idx=0)
-            state[b_id] = (bay_id, 0, 0, 0, entry, exit_t)
+            _, _, _, blx0, bly0 = raster_cache.get_block_mask(b_id, 0)
+            cx = int(math.ceil(-blx0))
+            cy = int(math.ceil(-bly0))
+            new_blk = Block(block_id=b_id, block_data=b_info, x=cx, y=cy, orient_idx=0)
+            state[b_id] = (bay_id, cx, cy, 0, entry, exit_t)
             bay_placed[bay_id].append(new_blk)
             bay_schedule[bay_id].append((entry, exit_t))
             
@@ -417,27 +418,38 @@ def generate_candidates(b_id, b_info, bays, bay_placed, bay_schedule, raster_cac
             spots.sort(key=lambda v: v[2], reverse=True)
             
             for gx, gy, score in spots:
-                new_blk = Block(block_id=b_id, block_data=b_info, x=gx, y=gy, orient_idx=o_idx)
+                cx = int(math.ceil(gx - blx0))
+                cy = int(math.ceil(gy - bly0))
+                new_blk = Block(block_id=b_id, block_data=b_info, x=cx, y=cy, orient_idx=o_idx)
                 has_col = False
                 for p_blk, (p_e, p_ex) in zip(bay_placed[bay.id], bay_schedule[bay.id]):
                     if _time_overlaps(entry, exit_t, p_e, p_ex) and check_collisions(bay, [new_blk, p_blk]):
                         has_col = True; break
                 if not has_col:
-                    p_in = [b for b, (a,e) in zip(bay_placed[bay.id], bay_schedule[bay.id]) if a <= entry < e]
-                    if not check_entry(bay, p_in, new_blk, fast=True):
-                        p_out = [new_blk] + [b for b, (a,e) in zip(bay_placed[bay.id], bay_schedule[bay.id]) if a <= exit_t < e]
-                        if not check_exit(bay, p_out, new_blk, fast=True):
-                            if not check_obstruction(new_blk, entry, exit_t, bay, bay_placed[bay.id], bay_schedule[bay.id]):
-                                cands.append({'id': b_id, 'bay': bay.id, 'x': gx, 'y': gy, 'o_idx': o_idx, 'entry': entry, 'exit': exit_t})
-                                if len(cands) >= num: return cands
+                    p_in = []
+                    p_out = [new_blk]
+                    obs_failed = False
+                    for p_blk, (p_e, p_ex) in zip(bay_placed[bay.id], bay_schedule[bay.id]):
+                        if p_e <= entry < p_ex: p_in.append(p_blk)
+                        if p_e <= exit_t < p_ex: p_out.append(p_blk)
+                        if entry <= p_e < exit_t and check_entry(bay, [new_blk], p_blk, fast=True):
+                            obs_failed = True; break
+                        if entry < p_ex <= exit_t and check_exit(bay, [new_blk], p_blk, fast=True):
+                            obs_failed = True; break
+                    
+                    if not obs_failed and not check_entry(bay, p_in, new_blk, fast=True) and not check_exit(bay, p_out, new_blk, fast=True):
+                        cands.append({'id': b_id, 'bay': bay.id, 'x': cx, 'y': cy, 'o_idx': o_idx, 'entry': entry, 'exit': exit_t})
+                        if len(cands) >= num: return cands
     
     if not cands: # fallback to earliest tardy
         for bay_idx in bay_order:
             bay = bays[bay_idx]
-            gx, gy, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, 0, raster_cache, 'forward')
-            if entry is not None:
-                cands.append({'id': b_id, 'bay': bay.id, 'x': gx, 'y': gy, 'o_idx': 0, 'entry': entry, 'exit': exit_t})
-                break
+            for o_idx in range(len(b_info['shape'])):
+                x, y, entry, exit_t = search_placement(b_id, b_info, bay, bay_placed[bay.id], bay_schedule[bay.id], r_time, p_time, d_time, o_idx, raster_cache, 'forward')
+                if entry is not None:
+                    cands.append({'id': b_id, 'bay': bay.id, 'x': x, 'y': y, 'o_idx': o_idx, 'entry': entry, 'exit': exit_t})
+                    break
+            if cands: break
     return cands
 
 def repair_cpsat(U, fixed_state, prob_info, bays, raster_cache, time_limit):
